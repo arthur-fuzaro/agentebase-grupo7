@@ -149,7 +149,6 @@ Para você saber o que falta quando precisar:
 - **Streaming** — a resposta aparece de uma vez
 - **Troca de provedor** — está preso à OpenAI; isolar em `chamar_modelo()` é o primeiro passo para mudar isso
 - **Persistência** — nada é salvo entre execuções, exceto o `memory.md`
-- **Testes** — nenhum
 - **Autenticação, logs, custos** — nada disso
 
 Tudo isso é infraestrutura em volta das ~35 linhas do `responder()`. O loop não
@@ -162,3 +161,20 @@ muda.
 Cada aluno pode fazer fork deste repositório e ter sua própria instância no
 ar, com deploy automático via GitHub Actions a cada `git push`. Passo a
 passo completo em [`DEPLOY_AZURE.md`](DEPLOY_AZURE.md).
+
+---
+
+## 9. Esteira de CI/CD e testes
+
+O workflow `.github/workflows/ci.yml` encadeia build, testes e deploy:
+
+```
+build → test-unit → test-contrato → test-run-level → test-smoke → test-eval → deploy
+```
+
+Em pull request rodam apenas os jobs sem chamada à API real, até o
+`test-run-level`. Na `main` roda tudo, e o deploy só acontece se todos os jobs
+anteriores passarem.
+
+- Plano de testes: [`docs/PLANO_DE_TESTES.md`](docs/PLANO_DE_TESTES.md)
+- Prompts usados para gerá-lo: [`docs/PROMPTS.md`](docs/PROMPTS.md)
