@@ -9,7 +9,7 @@
 #
 # O GitHub NUNCA conta a aprovação do próprio autor do PR como satisfazendo a
 # revisão obrigatória — nem quando o autor é o único CODEOWNER listado. Hoje
-# este repositório tem um único mantenedor (@FabianoCarneiro). Se você ligar
+# este repositório tem um único mantenedor (@arthur-fuzaro). Se você ligar
 # "require_code_owner_reviews" exatamente como está agora, NINGUÉM conseguirá
 # mesclar PR nenhum, nem você — porque não existe um segundo dono para aprovar.
 #
@@ -26,23 +26,23 @@
 # (não-admin) fica sujeito ao portão completo.
 
 # Dono padrão — cobre qualquer arquivo que nenhuma regra abaixo capturar.
-*                      @FabianoCarneiro
+*                      @arthur-fuzaro
 
 # Núcleo do agente: toda personalidade (agent-*.md) depende deste código.
-/agent.py              @FabianoCarneiro
-/app.py                @FabianoCarneiro
+/agent.py              @arthur-fuzaro
+/app.py                @arthur-fuzaro
 
 # Perfis de agente — cada um É o prompt de sistema, não documentação.
-/agent.md              @FabianoCarneiro @FABIANO-DA-SILVA-CARNEIRO 
-/agent-ada.md          @FabianoCarneiro
-/agent-lint.md         @FabianoCarneiro
-/agent-val.md          @FabianoCarneiro
+/agent.md              @arthur-fuzaro
+/agent-ada.md          @arthur-fuzaro
+/agent-lint.md         @arthur-fuzaro
+/agent-val.md          @arthur-fuzaro
 
 # Memória injetada no prompt a cada execução — sensível por ir direto ao modelo.
-/memory.md             @FabianoCarneiro
+/memory.md             @arthur-fuzaro
 
 # Dependências do projeto.
-/requirements.txt      @FabianoCarneiro
+/requirements.txt      @arthur-fuzaro
 
 # Governança do próprio repositório — mudar isso é sensível por definição.
-/.github/              @FabianoCarneiro
+/.github/              @arthur-fuzaro
