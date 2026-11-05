@@ -1,42 +1,51 @@
-# Deploy automático para um Azure Web App próprio.
+# Deploy no Azure Web App, chamado pelo job `deploy` do ci.yml.
 #
-# Este workflow é genérico de propósito: cada aluno que faz fork deste
-# repositório configura seus próprios secrets (AZURE_WEBAPP_NAME e
-# AZURE_WEBAPP_PUBLISH_PROFILE) e passa a ter deploy automático a cada push
-# na própria main. Veja o passo a passo completo em DEPLOY_AZURE.md.
+# Só pode ser chamado por outro workflow: assim nada é publicado sem passar
+# pelos testes. Para publicar manualmente, dispare o workflow CI na main.
 #
-# Sem os secrets configurados (ex.: no repositório-template original), o job
-# roda, avisa que faltam secrets e PULA o deploy — não falha a run.
+# Secrets necessários: AZURE_WEBAPP_NAME e AZURE_WEBAPP_PUBLISH_PROFILE.
+# Sem eles o job falha, para a esteira não ficar verde sem ter publicado.
+# Passo a passo em DEPLOY_AZURE.md.
 
 name: Deploy Azure
 
 on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
+  workflow_call:
 
 jobs:
   deploy:
     # Com DEPLOY_ESTRATEGIA=canary quem publica é o deploy-canary.yml.
     if: vars.DEPLOY_ESTRATEGIA != 'canary'
     runs-on: ubuntu-latest
+    # O mesmo grupo do deploy-canary.yml: um deploy de produção por vez.
+    concurrency:
+      group: deploy-producao
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
       - name: Checar secrets do Azure
-        id: secrets
+        env:
+          AZURE_WEBAPP_NAME: ${{ secrets.AZURE_WEBAPP_NAME }}
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
         run: |
-          if [ -z "${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}" ] || [ -z "${{ secrets.AZURE_WEBAPP_NAME }}" ]; then
-            echo "::warning::Secrets AZURE_WEBAPP_NAME / AZURE_WEBAPP_PUBLISH_PROFILE não configurados. Deploy pulado — veja DEPLOY_AZURE.md para configurar seu próprio Azure Web App."
-            echo "pronto=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "pronto=true" >> "$GITHUB_OUTPUT"
-          fi
+          [ -n "$AZURE_WEBAPP_NAME" ] && [ -n "$AZURE_WEBAPP_PUBLISH_PROFILE" ] || {
+            echo "::error::Secrets AZURE_WEBAPP_NAME / AZURE_WEBAPP_PUBLISH_PROFILE não configurados. Veja DEPLOY_AZURE.md."
+            exit 1
+          }
 
       - name: Deploy no Azure Web App
-        if: steps.secrets.outputs.pronto == 'true'
+        id: deploy
         uses: azure/webapps-deploy@v3
         with:
           app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: .
+
+      - name: Health check do app publicado
+        env:
+          WEBAPP_URL: ${{ steps.deploy.outputs.webapp-url }}
+        run: |
+          # Sempre em HTTPS: um redirect de http passaria na checagem sem provar nada.
+          url="${WEBAPP_URL%/}"
+          bash .github/scripts/canary.sh saude "${url/#http:/https:}" 30

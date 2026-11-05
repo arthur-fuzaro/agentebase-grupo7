@@ -1,21 +1,17 @@
-# Caminho real no repositório: .github/workflows/ci.yml
+# Esteira de build, teste e deploy do agente.
 #
-# O job `build` cobre o piso mínimo: dependências instalam, os dois arquivos
-# Python compilam, o lint não acusa nada. A suíte de testes em tests/ roda
-# em três jobs separados, um por camada da pirâmide de testes:
+#   build -> test-unit -> test-contrato -> test-run-level -> test-smoke -> test-eval -> deploy
 #
-#   - test-unit       → somar, executar_ferramenta, carregar_contexto
-#   - test-contrato   → FERRAMENTAS bate com o código Python de verdade
-#   - test-run-level  → responder() completo, com o cliente da OpenAI
-#                        trocado por um dublê (sem gastar chamada real)
+# Em todo PR rodam só os jobs sem custo: build e testes sem API real
+# (o cliente da OpenAI é um dublê no run-level).
 #
-# Os três dependem de `build` (só rodam se o piso mínimo passar) e aparecem
-# como checks independentes na UI do GitHub.
+# Em push na main ou disparo manual rodam também:
+#   - test-smoke: integração real com a OpenAI;
+#   - test-eval:  evals do agente publicado (agent.md) e das personas.
+# Os dois falham se OPENAI_API_KEY faltar, para nunca ficarem verdes sem testar.
 #
-# O que NÃO roda aqui: tests/test_smoke.py, marcado `smoke`, que chama a API
-# de verdade. Ele custa dinheiro e não é 100% determinístico — não pertence
-# ao gate de todo PR. Roda manualmente ou num job separado, com
-# `pytest -m smoke` e OPENAI_API_KEY configurada.
+# O deploy só roda na main e só se todos os jobs anteriores passarem.
+# Critérios completos em docs/PLANO_DE_TESTES.md.
 
 name: CI
 
@@ -25,6 +21,9 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -62,12 +61,10 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Testes unitários (somar, executar_ferramenta, carregar_contexto)
+      - name: Testes unitários (somar, executar_ferramenta, carregar_contexto, roteador)
         env:
           PYTHONUNBUFFERED: "1"
-        run: |
-          echo "Rodando testes unitários (marker: unitario)..."
-          pytest -m unitario -vv -s
+        run: pytest -m unitario -vv -s
 
   test-contrato:
     needs: test-unit
@@ -86,33 +83,10 @@ jobs:
       - name: Testes de contrato (FERRAMENTAS vs. código Python)
         env:
           PYTHONUNBUFFERED: "1"
-        run: |
-          echo "Rodando testes de contrato (marker: contrato)..."
-          pytest -m contrato -vv -s
-  
-  test-smoke:
-    needs: test-contrato
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Instalar dependências
-        run: pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Testes de contrato (FERRAMENTAS vs. código Python)
-        env:
-          PYTHONUNBUFFERED: "1"
-        run: |
-          echo "Rodando testes de contrato (marker: contrato)..."
-          pytest -m smoke -vv -s
+        run: pytest -m contrato -vv -s
 
   test-run-level:
-    needs: test-smoke
+    needs: test-contrato
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -128,14 +102,16 @@ jobs:
       - name: Testes run-level (responder(), cliente da OpenAI dublado)
         env:
           PYTHONUNBUFFERED: "1"
-        run: |
-          echo "Rodando testes run-level (marker: run_level)..."
-          pytest -m run_level -vv -s
-          
-  test-eval:
+        run: pytest -m run_level -vv -s
+
+  test-smoke:
     needs: test-run-level
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AGENTE_TEMPERATURA: "0.2"
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -147,10 +123,41 @@ jobs:
       - name: Instalar dependências
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Eval de persona (Ada, Val, Lint — chama a API real)
-        env:
-          PYTHONUNBUFFERED: "1"
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - name: Checar OPENAI_API_KEY
         run: |
-          echo "Rodando eval de persona (marker: eval)..."
-          pytest -m eval -vv -s
+          [ -n "$OPENAI_API_KEY" ] || { echo "::error::Secret OPENAI_API_KEY não configurado: o smoke seria pulado sem testar."; exit 1; }
+
+      - name: Smoke test (API real da OpenAI)
+        run: pytest -m smoke -vv -s
+
+  test-eval:
+    needs: test-smoke
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AGENTE_TEMPERATURA: "0.2"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Instalar dependências
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Checar OPENAI_API_KEY
+        run: |
+          [ -n "$OPENAI_API_KEY" ] || { echo "::error::Secret OPENAI_API_KEY não configurado: o eval seria pulado sem testar."; exit 1; }
+
+      - name: Evals (agente publicado e personas, API real)
+        run: pytest -m eval -vv -s
+
+  deploy:
+    needs: test-eval
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/deploy-azure.yml
+    secrets: inherit
